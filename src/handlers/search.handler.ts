@@ -4,28 +4,41 @@ import axios from "axios";
 import { primaryMovieSite, secondaryMovieSite } from "../lib/constants";
 import * as levenshtein from "fastest-levenshtein";
 
+const getSearchText = (text: string) => {
+  const searchText = text.split("/search")[1].trim();
+  return searchText.replaceAll(" ", "-");
+};
+
+const fetchResults = async (url: string) => {
+  try {
+    const response = await axios.get(url);
+    return response;
+  } catch (error) {
+    return null;
+  }
+};
+
 export default async function seachHandler(ctx: Context) {
-  
-  const search_text = (ctx.message['text'] as string).split("/search")[1].trim();
-  const search_text_with_hyphens = search_text.replaceAll(" ", "-");
-  const fallbackUrl = `${secondaryMovieSite}/search/${search_text_with_hyphens}`;
-  let baseUrl = primaryMovieSite;
-  const response = await axios.get(`${primaryMovieSite}/search/${search_text_with_hyphens}`)
-    .catch(async () => await axios.get(fallbackUrl));
-  
-  if (response.status !== 200) {
+  const searchTextWithHyphens = getSearchText(ctx.message['text'] as string);
+  const fallbackUrl = `${secondaryMovieSite}/search/${searchTextWithHyphens}`;
+  const primaryUrl = `${primaryMovieSite}/search/${searchTextWithHyphens}`;
+
+  const response = await fetchResults(primaryUrl) || await fetchResults(fallbackUrl);
+
+  if (!response || response.status !== 200) {
     return ctx.reply("Something went wrong");
   }
-  baseUrl = response.request.host === "movie4kto.net" ? secondaryMovieSite : baseUrl;
+
+  const baseUrl = response.request.host === "movie4kto.net" ? secondaryMovieSite : primaryMovieSite;
   const $ = cheerio.load(response.data);
   const results = parseResults($, baseUrl);
   const closestMatch = results.reduce((prev, curr) => {
-    const prevDistance = levenshtein.distance(search_text, prev.title);
-    const currDistance = levenshtein.distance(search_text, curr.title);
+    const prevDistance = levenshtein.distance(searchTextWithHyphens, prev.title);
+    const currDistance = levenshtein.distance(searchTextWithHyphens, curr.title);
     return prevDistance < currDistance ? prev : curr;
   });
-  const { url, title } = closestMatch;
-  ctx.reply(`${title} - ${url}`);
+
+  ctx.reply(`${closestMatch.title} - ${closestMatch.url}`);
 }
 
 const parseResults = ($, baseUrl) => {
